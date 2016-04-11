@@ -1,0 +1,92 @@
+---------------------------------------------------------------------------- 
+Fishey v0.01  2005-3-31                                             /@~\/|
+© 1998, 2005 Pontus Lurcock (with thanks to [FlY'96])               \__/\|
+----------------------------------------------------------------------------
+
+SUMMARY
+
+ A desktop magnifier program which produces a `fish-eye' distortion
+ effect.
+
+INTRODUCTION
+
+ Fishey works much like any other desktop magnifier, with the
+ difference that the magnification varies across the simulated lens:
+ it is greatest at the centre, and zero at the edges. This produces a
+ barrel distortion effect, where straight lines become curved near the
+ edge of the magnifier. Similar barrel distortion is produced by
+ fish-eye camera lenses, hence the name.
+
+USE
+
+ Fishey works like any other desktop magnifier, and the choices window
+ ought to be fairly self-explanatory. Note that, as with most or all
+ magnification programs, Fishey's `follow caret' function won't work
+ with Zap or StrongEd, which handle caret drawing themselves and don't
+ reveal the caret's position to prying programs.
+
+REQUIREMENTS
+
+ Fishey is written entirely in C, so blazing speed is not one of its
+ chief virtues. Size 128 and update 5 cs on my RiscPC 600 seems to go
+ pretty reasonably, but it crawls at a size of 256. Apologies to ARM2
+ and ARM250 users, who will probably find it well-nigh unusable. 
+ Fishey also requires Acorn's Toolbox modules and hence Risc OS 3.10
+ or later. [This paragraph was written in 1999 for the first release;
+ I imagine there aren't many ARM2 users out there these days.]
+
+ This version is compiled for processors running in 26-bit mode; the
+ main motivation for this release (with source) is to enable someone
+ to compile a 32-bit version (see acknowledgements section).
+
+ One other thing: Fishey won't work in 4- or 2-colour modes. Sorry
+ about this, but it probably wouldn't be worth the effort to do.
+
+TECHNICAL DETAILS
+
+ Fishey builds a table of offsets from which to read in pixels of the
+ display (doing it the other way round would lead to gaps, probably). 
+ That's about all there is to be said about it. The algorithm for the
+ distortion used is based heavily on (though not copied directly from)
+ the program !Flyns by [FlY'96]. I can't remember where this came from
+ ---I think it was on a Datafile or Acorn User CD-ROM...
+
+ACKNOWLEDGEMENTS
+
+ Inspiration and the original magnification algorithm came from
+ !Flyns. Invaluable development tools were: Zap (Dominic Symes et
+ al.), StrongHelp (Guttorm Vik), the Toolbox (Acorn), OSLib (Jonathan
+ Coxhead), and ToolLib (Paul Field).
+
+ Thanks for this release are due to Michael Drake, who emailed me out
+ of the blue, years after I forgot I'd ever written this program, to
+ ask for a 32-bit version, or the means to produce one.
+
+HISTORY
+
+ v0.00  1999-1-9   Initial release
+ v0.01  2005-3-31  Rewrote help file and changed licence
+
+LICENCE
+
+ My own code is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2, or (at your option)
+ any later version. The full licence text of version 2 should be in
+ the file `GPL' in the application directory.
+
+ Fishey makes use of parts of Paul Field's ToolLib, which is
+ distributed under a different but (by my reckoning) compatible
+ licence; ToolLib's licence should be in the file `TL-Lic' in the
+ application directory.
+
+SOURCE
+
+ Source code is in the `source' directory within the application
+ directory.
+
+CONTACT
+
+ I may be emailed as <pont talvi net> with an at-sign and dot
+ inserted appropriately.
+

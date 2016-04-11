@@ -1,0 +1,81 @@
+/* Choices */
+
+/*  This file is part of Fishey.
+
+    Fishey is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    Fishey is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Fishey; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*/
+
+#include <stdio.h>
+
+#include "optionbutton.h"
+#include "numberrange.h"
+#include "nev_toolbox.h"
+#include "main.h"
+#include "choices.h"
+
+choiceblk choices;
+
+nevent_result choices_open_handler(bits action_num, toolbox_action* action,
+  toolbox_block* id_block, void* handle)
+{
+  NOT_USED(action_num);
+  NOT_USED(action);
+  NOT_USED(handle);
+
+  numberrange_set_value(0, id_block->this_obj, 1, choices.refresh);
+  numberrange_set_value(0, id_block->this_obj, 4, 512-choices.zoom);
+  optionbutton_set_state(0, id_block->this_obj, 5, choices.caret);
+  numberrange_set_value(0, id_block->this_obj, 8, choices.size);
+
+  return nevent_HANDLED;
+}
+
+nevent_result choices_set_handler(bits action_num, toolbox_action* action,
+  toolbox_block* id_block, void* handle)
+{
+  choiceblk old;
+  FILE * fileh;
+
+  NOT_USED(action);
+  NOT_USED(handle);
+
+  old = choices;
+  choices.refresh = numberrange_get_value(0, id_block->this_obj, 1);
+  choices.zoom = 512-numberrange_get_value(0, id_block->this_obj, 4);
+  choices.caret = optionbutton_get_state(0, id_block->this_obj, 5);
+  choices.size = numberrange_get_value(0, id_block->this_obj, 8);
+
+  if (action_num == action_CHOICES_SAVE) {
+    fileh = fopen("<Fishey$Dir>.Choices","w");
+    fprintf(fileh, "%d\n%d\n%d\n%d\n", choices.size, choices.refresh,
+      choices.zoom, choices.caret);
+    fclose(fileh);
+  }
+
+  if (old.zoom!=choices.zoom || old.size!=choices.size)
+    init_lens(choices.size);
+
+  return nevent_HANDLED;
+}
+
+void choices_load(void)
+{
+  FILE * fileh;
+
+  fileh = fopen("<Fishey$Dir>.Choices","r");
+  fscanf(fileh, "%d\n%d\n%d\n%d\n", &choices.size, &choices.refresh,
+    &choices.zoom, &choices.caret);
+  fclose(fileh);
+}

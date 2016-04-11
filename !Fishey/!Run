@@ -1,0 +1,27 @@
+IconSprites <Obey$Dir>.!Sprites
+
+Set Fishey$Dir <Obey$Dir>
+
+RMEnsure UtilityModule 3.10 Error I can only be run on RISC OS 3.10 or later
+
+RMEnsure FilterManager 0.09 RMLoad System:modules.FilterMgr
+RMEnsure FilterManager 0.09 Error You need filter manager 0.09
+RMEnsure BorderUtils 0.02 RMEnsure WindowManager 3.17  RMLoad System:modules.BorderUtil
+RMEnsure Toolbox    0.00  RMLOAD System:modules.toolbox.toolbox
+RMEnsure Toolbox    1.23  ERROR You need toolbox 1.23 or later
+RMEnsure Window     0.00  RMLOAD System:modules.toolbox.window
+RMEnsure Window     1.15  ERROR You need window 1.15 or later
+RMEnsure Menu       0.00  RMLOAD System:modules.toolbox.menu
+RMEnsure Menu       0.15  ERROR You need menu 0.15 or later
+RMEnsure Iconbar    0.00  RMLOAD System:modules.toolbox.iconbar
+RMEnsure Iconbar    1.08  ERROR You need iconbar 1.08 or later
+RMEnsure ProgInfo   0.00  RMLOAD System:modules.toolbox.proginfo
+RMEnsure ProgInfo   0.05  ERROR You need proginfo 0.05 or later
+
+WimpSlot -min 28k -max 28k
+|If "<Fishey$Running>" <> "" then Error !Fishey is already running
+Set Fishey$Running Yes
+
+Run <Fishey$Dir>.!RunImage
+
+unset Fishey$Running

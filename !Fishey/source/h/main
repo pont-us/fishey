@@ -1,0 +1,4 @@
+/* Auto */
+
+extern void init_lens(int dia)
+;

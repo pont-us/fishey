@@ -1,0 +1,391 @@
+/*** Fishey ***/
+
+/*  This file is part of Fishey.
+
+    Fishey is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    Fishey is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Fishey; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+*/
+
+#define application_internal
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+
+#include "os.h"
+#include "hourglass.h"
+#include "shifting.h"
+#include "appshell.h"
+#include "exception.h"
+#include "nev_wimp.h"
+#include "nev_message.h"
+#include "nev_toolbox.h"
+#include "window.h"
+#include "choices.h"
+#include "main.h"
+
+static toolbox_o mainw_id;
+static short int * xtab = NULL, * ytab = NULL;
+static int lens_rad, lens_dia;
+
+static struct {
+  unsigned int size, xsize, ysize, log2bpp, xeig, yeig, bytelinelen;
+  char *dispstart;
+} scrdat;
+
+typedef struct {
+  char *start;
+  unsigned int pixwidth, bytewidth, lines;
+  os_box box;
+} screenblock;
+
+void init_lens(int dia)
+{
+  long int x,y,a,b,p,q,aa,bb,xx,yy,S2,T2;
+  float z;
+  wimp_window_state wstate;
+
+  hourglass_on();
+  lens_dia = dia;
+  lens_rad = dia / 2;
+  S2 = lens_rad*lens_rad;
+  T2 = S2 + choices.zoom * choices.zoom;
+
+  if (xtab==NULL) {
+    shifting_allocate((shifting_ptr)&xtab, dia * dia * sizeof(short int));
+    shifting_allocate((shifting_ptr)&ytab, dia * dia * sizeof(short int));
+  }
+  else {
+    if (shifting_size((shifting_ptr)&xtab) != dia*dia*sizeof(short int)) {
+      shifting_alter_size((shifting_ptr)&xtab, dia * dia * sizeof(short int));
+      shifting_alter_size((shifting_ptr)&ytab, dia * dia * sizeof(short int));
+    }
+  }
+
+  for (y=0;y<=lens_rad;y++)
+  {
+    for (x=0;x<=y;x++)
+    {
+      if ((x*x+y*y)>=S2) { a=x; b=y; }
+      else {
+        z = (float)sqrt(T2-x*x-y*y);
+        a = (int)floor((double)((x*choices.zoom)/z + 0.5));
+        b = (int)floor((double)((y*choices.zoom)/z + 0.5));
+      }
+      for (p=-1;p<=1;p+=2) {
+        for (q=-1;q<=1;q+=2) {
+         aa = a*p; xx = x*p;
+         bb = b*q; yy = y*q;
+         if ((xx!=lens_rad)&&(yy!=lens_rad)) {
+         *((short int *)(xtab+(yy+lens_rad)*dia+xx+lens_rad)) = aa+lens_rad;
+         *((short int *)(ytab+(yy+lens_rad)*dia+xx+lens_rad)) = bb+lens_rad;
+         *((short int *)(xtab+(xx+lens_rad)*dia+yy+lens_rad)) = bb+lens_rad;
+         *((short int *)(ytab+(xx+lens_rad)*dia+yy+lens_rad)) = aa+lens_rad;
+         }
+        }
+      }
+    }
+  }
+
+  wstate.w = window_get_wimp_handle(0, mainw_id);
+  wimp_get_window_state(&wstate);
+  wstate.visible.x1 = wstate.visible.x0 + dia*2;
+  wstate.visible.y0 = wstate.visible.y1 - dia*2;
+  wimp_open_window((wimp_open *) &wstate);
+
+  hourglass_off();
+}
+
+
+static void read_screen_data(void)
+{
+  os_vdu_var var[] = {os_MODEVAR_SCREEN_SIZE, os_MODEVAR_XWIND_LIMIT,
+  	os_MODEVAR_YWIND_LIMIT, os_MODEVAR_LOG2_BPP, os_MODEVAR_XEIG_FACTOR,
+  	os_MODEVAR_YEIG_FACTOR, os_MODEVAR_LINE_LENGTH,
+  	os_VDUVAR_DISPLAY_START, -1};
+
+  os_read_vdu_variables((os_vdu_var_list *) &var, (int *) &scrdat);
+}
+
+static nevent_result modechange_handler(wimp_message *message, void *handle)
+{
+  NOT_USED(message);
+  NOT_USED(handle);
+  read_screen_data();
+  return nevent_HANDLED;
+}
+
+static void convert_coords(os_box * box_in, screenblock * out)
+{
+  out->box.x0 = (box_in->x0)>>(scrdat.xeig);
+  out->box.x1 = (box_in->x1)>>(scrdat.xeig);
+  out->box.y0 = scrdat.ysize-((box_in->y0)>>(scrdat.yeig));
+  out->box.y1 = scrdat.ysize-((box_in->y1)>>(scrdat.yeig));
+  out->start = scrdat.dispstart +
+    ((out->box.y1+1)*scrdat.bytelinelen) +
+    ((out->box.x0<<scrdat.log2bpp)>>3);
+  out->pixwidth = out->bytewidth = out->box.x1-out->box.x0;
+  out->lines = abs(out->box.y0 - out->box.y1);
+}
+
+static nevent_result redraw_handler(wimp_event_no event_num, wimp_block* event,
+  toolbox_block* id_block, void* handle)
+{
+  bool more;
+  int orig_x, orig_y, xoffs, yoffs, index, lensdia_not;
+  os_box mousepos;
+  wimp_caret caretblk;
+  wimp_window_state wstate;
+  screenblock srcblk, destblk, winblk;
+
+  NOT_USED(handle);
+  NOT_USED(id_block);
+  NOT_USED(event_num);
+
+  more = wimp_redraw_window(&event->redraw);
+  orig_x = event->redraw.box.x0 - event->redraw.xscroll;
+  orig_y = event->redraw.box.y1 - event->redraw.yscroll;
+  switch (choices.caret) {
+    case TRUE: wimp_get_caret_position(&caretblk);
+      if ((caretblk.w != wimp_BACKGROUND)&& !(caretblk.height&(1<<25))) {
+        wstate.w = caretblk.w;
+        wimp_get_window_state(&wstate);
+        mousepos.x0 = caretblk.pos.x + (wstate.visible.x0-wstate.xscroll);
+        mousepos.y0 = caretblk.pos.y + (wstate.visible.y1-wstate.yscroll)
+          + (caretblk.height & 0xffff)/2;
+        break;
+      }
+    default: os_mouse(&(mousepos.x0), &(mousepos.y0), NULL, NULL);
+  }
+  mousepos.x0 -= (lens_rad<<scrdat.xeig);
+  mousepos.y0 -= (lens_rad<<scrdat.yeig);
+  mousepos.x1 = mousepos.x0 + (lens_dia<<scrdat.xeig);
+  mousepos.y1 = mousepos.y0 + (lens_dia<<scrdat.yeig);
+  convert_coords(&mousepos, &srcblk);
+  convert_coords(&(event->redraw.box), &winblk);
+  if (scrdat.xeig<scrdat.yeig) lensdia_not = 2*lens_dia;
+  else lensdia_not = lens_dia;
+
+  switch (scrdat.log2bpp) {
+    case 2: {
+      byte * pixaddr, * pixaddr2;
+      byte colour, fix;
+      while (more) {
+        int x,y;
+        convert_coords(&(event->redraw.clip), &destblk);
+        xoffs = (destblk.box.x0 - winblk.box.x0)/2;
+        yoffs = - winblk.box.y1 + destblk.box.y1;
+        for (y=0; y<destblk.lines; y++) {
+          fix = destblk.box.x0 % 2;
+          for (x=fix; x<destblk.bytewidth+fix; x++) {
+            pixaddr = (byte *)(destblk.start+y*scrdat.bytelinelen + x/2);
+            index = (y+yoffs)*lensdia_not + x+xoffs-fix;
+            if (srcblk.box.x0+xoffs+xtab[index]<0
+             || srcblk.box.x0+xoffs+xtab[index]>=scrdat.bytelinelen*2
+             || srcblk.box.y1-yoffs+ytab[index]<0
+             || srcblk.box.y1-yoffs+ytab[index]>=scrdat.ysize)
+              colour = 0x77;
+            else {
+              pixaddr2 = (byte *)(srcblk.start + xtab[index]/2 +
+                (ytab[index]) * scrdat.bytelinelen);
+                colour = *pixaddr2;
+            }
+            if (((xtab[index])%2)==0) colour = (colour&15);
+            else colour = (colour&240)>>4;
+            if ((x%2)==0) colour = colour | ((*pixaddr) & 0xf0);
+            else colour = (colour<<4) | ((*pixaddr) & 0x0f);
+            *pixaddr = colour;
+          }
+        }
+        more = wimp_get_rectangle(&event->redraw);
+      }
+    }
+    case 3: {
+      byte * pixaddr, * pixaddr2;
+      while (more) {
+        int x,y;
+        convert_coords(&(event->redraw.clip), &destblk);
+        xoffs = destblk.box.x0 - winblk.box.x0;
+        yoffs = - winblk.box.y1 + destblk.box.y1;
+        for (y=0; y<destblk.lines; y++) {
+          for (x=0; x<destblk.bytewidth; x++) {
+            pixaddr = (byte *)(destblk.start+y*scrdat.bytelinelen + x);
+            index = (y+yoffs)*lensdia_not + x+xoffs;
+            if (srcblk.box.x0+xoffs+xtab[index]<0
+             || srcblk.box.x0+xoffs+xtab[index]>=scrdat.bytelinelen
+             || srcblk.box.y1-yoffs+ytab[index]<0
+             || srcblk.box.y1-yoffs+ytab[index]>=scrdat.ysize)
+              *pixaddr = 0;
+            else {
+              pixaddr2 = (byte *)(srcblk.start + xtab[index] +
+                (ytab[index]) * scrdat.bytelinelen);
+              *pixaddr = *pixaddr2;
+            }
+          }
+        }
+        more = wimp_get_rectangle(&event->redraw);
+      }
+    }
+    case 4: {
+      short int * pixaddr, * pixaddr2;
+      while (more) {
+        int x,y;
+        convert_coords(&(event->redraw.clip), &destblk);
+        xoffs = (destblk.box.x0 - winblk.box.x0)*2;
+        yoffs = - winblk.box.y1 + destblk.box.y1;
+        for (y=0; y<destblk.lines; y++) {
+          for (x=0; x<destblk.pixwidth; x++) {
+            pixaddr = (short int *)(destblk.start+y*scrdat.bytelinelen + 2*x);
+            index = (y+yoffs)*lensdia_not + x+xoffs;
+            if (srcblk.box.x0+xoffs+xtab[index]<0
+             || srcblk.box.x0+xoffs+xtab[index]>=scrdat.xsize
+             || srcblk.box.y1-yoffs+ytab[index]<0
+             || srcblk.box.y1-yoffs+ytab[index]>=scrdat.ysize)
+              *pixaddr = 0;
+            else {
+              pixaddr2 = (short int *)(srcblk.start + 2*xtab[index] +
+                (ytab[index]) * scrdat.bytelinelen);
+              *pixaddr = *pixaddr2;
+            }
+          }
+        }
+        more = wimp_get_rectangle(&event->redraw);
+      }
+    }
+    case 5: {
+      long int * pixaddr, * pixaddr2;
+      while (more) {
+        int x,y;
+        convert_coords(&(event->redraw.clip), &destblk);
+        xoffs = (destblk.box.x0 - winblk.box.x0)*4;
+        yoffs = - winblk.box.y1 + destblk.box.y1;
+        for (y=0; y<destblk.lines; y++) {
+          for (x=0; x<destblk.pixwidth; x++) {
+            pixaddr = (long int *)(destblk.start+y*scrdat.bytelinelen + 4*x);
+            index = (y+yoffs)*lensdia_not + x+xoffs;
+            if (srcblk.box.x0+xoffs+xtab[index]<0
+             || srcblk.box.x0+xoffs+xtab[index]>=scrdat.xsize
+             || srcblk.box.y1-yoffs+ytab[index]<0
+             || srcblk.box.y1-yoffs+ytab[index]>=scrdat.ysize)
+              *pixaddr = 0;
+            else {
+              pixaddr2 = (long int *)(srcblk.start + 4*xtab[index] +
+                (ytab[index]) * scrdat.bytelinelen);
+              *pixaddr = *pixaddr2;
+            }
+          }
+        }
+        more = wimp_get_rectangle(&event->redraw);
+      }
+    }
+
+  }
+
+  return nevent_HANDLED;
+}
+
+static nevent_result null_handler(wimp_event_no event_num, wimp_block* event,
+  toolbox_block* id_block, void* handle)
+{
+  os_box extent;
+
+  NOT_USED(event_num);
+  NOT_USED(event);
+  NOT_USED(id_block);
+  NOT_USED(handle);
+
+  window_get_extent(0, mainw_id, &extent);
+  window_force_redraw(0, mainw_id, &extent);
+
+  return nevent_HANDLED;
+}
+
+static nevent_result click_handler(wimp_event_no event_num, wimp_block* event,
+  toolbox_block* id_block, void* handle)
+{
+  wimp_drag drag;
+  wimp_window_state wstate;
+
+  NOT_USED(id_block);
+  NOT_USED(handle);
+  NOT_USED(event_num);
+
+  switch (event->pointer.buttons) {
+    case wimp_DRAG_SELECT:
+    case wimp_DRAG_ADJUST:
+    if (TRUE) {
+      drag.w = wstate.w = event->pointer.w;
+      wimp_get_window_state(&wstate);
+      drag.type = wimp_DRAG_SYSTEM_POSITION;
+      drag.initial = wstate.visible;
+      wimp_drag_box(&drag);
+    }
+  }
+  return nevent_HANDLED;
+}
+
+static void fishey_initialise(int argc, char *argv[])
+{
+  NOT_USED(argc);
+  NOT_USED(argv);
+
+#ifndef NDEBUG
+  /* Redirect error stream */
+  freopen("pipe:$.debug", "w", stderr);
+#endif
+
+  choices_load();
+  read_screen_data();
+  nevent_wimp_initialise();
+
+  shifting_initialise_for_toolbox();
+
+  mainw_id = toolbox_create_object(0, (toolbox_id)"Display");
+  init_lens(choices.size);
+
+  nevent_wimp_register_handler(nevent_ALL_OBJECTS, wimp_REDRAW_WINDOW_REQUEST,
+    redraw_handler, 0);
+  nevent_wimp_register_handler(nevent_ALL_OBJECTS, wimp_NULL_REASON_CODE,
+    null_handler, 0);
+  nevent_message_register_handler(message_MODE_CHANGE, modechange_handler,0);
+  nevent_toolbox_register_handler(nevent_ALL_OBJECTS, action_CHOICES_OPEN,
+    choices_open_handler, 0);
+  nevent_toolbox_register_handler(nevent_ALL_OBJECTS, action_CHOICES_SET,
+    choices_set_handler, 0);
+  nevent_toolbox_register_handler(nevent_ALL_OBJECTS, action_CHOICES_SAVE,
+    choices_set_handler, 0);
+  nevent_wimp_register_handler(mainw_id, wimp_MOUSE_CLICK, click_handler,0);
+}
+
+static const int toolbox_actions[] =
+{
+  action_CHOICES_OPEN,
+  action_CHOICES_SET,
+  action_CHOICES_SAVE,
+  0x82a91,
+  0
+};
+
+static const int wimp_messages[] = { message_MODE_CHANGE };
+
+application this_application =
+{ "<Fishey$Dir>",
+  310,
+  toolbox_actions,
+  wimp_messages,
+  5,
+  fishey_initialise,
+  NULL
+};
+
